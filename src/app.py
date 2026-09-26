@@ -1,5 +1,5 @@
 """
-RAG Chatbot - Streamlit UI.
+Advanced RAG Chatbot - Streamlit UI.
 
 Run with: streamlit run src/app.py
 """
@@ -11,20 +11,32 @@ import streamlit as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.rag_engine import RAGEngine  # noqa: E402
+from src.rag_engine import AdvancedRAGEngine  # noqa: E402
 
-st.set_page_config(page_title="RAG Chatbot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Advanced RAG Chatbot", page_icon="🤖", layout="wide")
 
-st.title("🤖 RAG Chatbot")
-st.markdown("Ask questions about your documents — answers come with sources.")
+st.title("🤖 Advanced RAG Chatbot")
+st.markdown(
+    "Hybrid retrieval (dense + BM25) → cross-encoder reranking → "
+    "grounded answers with evaluation metrics."
+)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 INDEX_DIR = os.path.join(os.path.dirname(__file__), "..", "faiss_index")
 
+with st.sidebar:
+    st.header("⚙️ Pipeline Settings")
+    use_expansion = st.toggle("Query expansion", value=True)
+    use_reranker = st.toggle("Cross-encoder reranking", value=True)
+    show_metrics = st.toggle("Show evaluation metrics", value=False)
+    final_k = st.slider("Final top-k chunks", 1, 8, 4)
+
 
 @st.cache_resource
-def get_engine() -> RAGEngine:
-    engine = RAGEngine()
+def get_engine(_use_expansion: bool, _use_reranker: bool) -> AdvancedRAGEngine:
+    engine = AdvancedRAGEngine(
+        use_query_expansion=_use_expansion, use_reranker=_use_reranker
+    )
     if os.path.exists(INDEX_DIR):
         engine.load_index(INDEX_DIR)
     else:
@@ -40,7 +52,7 @@ if not os.getenv("OPENAI_API_KEY"):
     st.warning("⚠️ Set your `OPENAI_API_KEY` in a `.env` file to use the chatbot.")
     st.stop()
 
-engine = get_engine()
+engine = get_engine(use_expansion, use_reranker)
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -48,10 +60,20 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-        if msg["role"] == "assistant" and msg.get("sources"):
-            with st.expander("📚 Sources"):
-                for s in msg["sources"]:
-                    st.caption(f"{s['source']}" + (f" — page {s['page']}" if s.get("page") is not None else ""))
+        if msg["role"] == "assistant":
+            if msg.get("sources"):
+                with st.expander("📚 Sources"):
+                    for s in msg["sources"]:
+                        st.caption(
+                            f"{s['source']}"
+                            + (f" — page {s['page']}" if s.get("page") is not None else "")
+                        )
+            if msg.get("metrics"):
+                with st.expander("📊 Evaluation metrics"):
+                    m = msg["metrics"]
+                    st.metric("Faithfulness", f"{m['faithfulness']:.2f}")
+                    st.metric("Answer relevancy", f"{m['answer_relevancy']:.2f}")
+                    st.metric("Context precision", f"{m['context_precision']:.2f}")
 
 if question := st.chat_input("Ask a question about your documents..."):
     st.session_state.messages.append({"role": "user", "content": question})
@@ -59,14 +81,28 @@ if question := st.chat_input("Ask a question about your documents..."):
         st.markdown(question)
 
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            result = engine.ask(question)
+        with st.spinner("Retrieving → reranking → answering..."):
+            result = engine.ask(question, evaluate=show_metrics)
         st.markdown(result["answer"])
         if result["sources"]:
             with st.expander("📚 Sources"):
                 for s in result["sources"]:
-                    st.caption(f"{s['source']}" + (f" — page {s['page']}" if s.get("page") is not None else ""))
+                    st.caption(
+                        f"{s['source']}"
+                        + (f" — page {s['page']}" if s.get("page") is not None else "")
+                    )
+        if result.get("metrics"):
+            with st.expander("📊 Evaluation metrics"):
+                m = result["metrics"]
+                st.metric("Faithfulness", f"{m['faithfulness']:.2f}")
+                st.metric("Answer relevancy", f"{m['answer_relevancy']:.2f}")
+                st.metric("Context precision", f"{m['context_precision']:.2f}")
 
     st.session_state.messages.append(
-        {"role": "assistant", "content": result["answer"], "sources": result["sources"]}
+        {
+            "role": "assistant",
+            "content": result["answer"],
+            "sources": result["sources"],
+            "metrics": result.get("metrics"),
+        }
     )
