@@ -1,26 +1,34 @@
-# 🤖 RAG Chatbot
+# 🤖 Advanced RAG Chatbot
 
-A production-style **Retrieval-Augmented Generation (RAG)** chatbot built with
-**LangChain**, **FAISS**, and **OpenAI**. Drop in your PDFs or text files, ask
-questions, and get grounded answers with cited sources.
+A production-style **Retrieval-Augmented Generation (RAG)** system with an
+advanced retrieval pipeline: **hybrid search**, **cross-encoder reranking**,
+**query expansion**, and **RAGAS-style evaluation** — built with LangChain,
+FAISS, and OpenAI.
 
 ## ✨ Features
 
+### Retrieval pipeline
 - 📄 Ingests **PDF** and **TXT** documents
 - ✂️ Smart chunking with overlap (RecursiveCharacterTextSplitter)
-- 🧠 Free local embeddings (`sentence-transformers/all-MiniLM-L6-v2`)
-- 🔍 FAISS vector search with top-k retrieval
+- 🔀 **Query expansion** — LLM rewrites the question into multiple search queries
+- 🔍 **Hybrid retrieval** — dense (FAISS) + sparse (BM25), fused with **Reciprocal Rank Fusion**
+- 🎯 **Cross-encoder reranking** (`ms-marco-MiniLM`) for precision on the final top-k
+
+### Generation & trust
 - 💬 Grounded answers — the LLM only uses retrieved context
 - 📚 Source citations (file + page number) for every answer
+- 📊 **Evaluation metrics** — faithfulness, answer relevancy, context precision (RAGAS-style)
 - 💾 Persistent FAISS index — builds once, reuses on restart
-- 🖥️ Clean Streamlit chat UI
+- 🖥️ Streamlit chat UI with pipeline toggles
 
 ## 🏗️ Architecture
 
 ```
-data/  ──►  Loader (PDF/TXT)  ──►  Chunker  ──►  Embeddings  ──►  FAISS index
-                                                                              │
-User question ──► Retriever (top-k) ──► Prompt + Context ──► LLM ──► Answer + Sources
+                        ┌─ Dense (FAISS) ─┐
+Query → Expansion ─┤                     ├─► RRF Fusion ─► Reranker ─► Top-k chunks
+                        └─ Sparse (BM25) ─┘                                        │
+                                                                                   ▼
+User question ──► Prompt + Context ──► LLM ──► Answer + Sources + Eval metrics
 ```
 
 ## 🚀 Quick Start
@@ -46,11 +54,14 @@ streamlit run src/app.py
 ```
 rag-chatbot/
 ├── src/
-│   ├── rag_engine.py   # Core RAG logic (load → chunk → embed → retrieve → answer)
-│   └── app.py          # Streamlit chat UI
-├── data/               # Put your PDFs / TXTs here
+│   ├── rag_engine.py       # AdvancedRAGEngine: full pipeline orchestration
+│   ├── hybrid_retriever.py # Dense + BM25 with Reciprocal Rank Fusion
+│   ├── reranker.py         # Cross-encoder reranking
+│   ├── query_expansion.py  # LLM multi-query expansion
+│   ├── evaluation.py       # RAGAS-style metrics (LLM judge)
+│   └── app.py              # Streamlit chat UI
+├── data/                   # Put your PDFs / TXTs here
 ├── tests/
-│   └── test_rag_engine.py
 ├── requirements.txt
 └── .env.example
 ```
@@ -59,11 +70,23 @@ rag-chatbot/
 
 | Parameter | Default | Description |
 |---|---|---|
-| `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model |
-| `llm_model` | `gpt-4o-mini` | Chat model for answers |
-| `chunk_size` | `1000` | Characters per chunk |
-| `chunk_overlap` | `200` | Overlap between chunks |
-| `top_k` | `4` | Retrieved chunks per query |
+| `embedding_model` | `sentence-transformers/all-MiniLM-L6-v2` | Local bi-encoder embeddings |
+| `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Cross-encoder for reranking |
+| `llm_model` | `gpt-4o-mini` | Chat model for answers & eval |
+| `chunk_size` | `800` | Characters per chunk |
+| `chunk_overlap` | `150` | Overlap between chunks |
+| `retrieval_k` | `12` | Candidates per retrieval branch |
+| `final_k` | `4` | Chunks after reranking |
+
+## 📊 Evaluation
+
+Toggle **"Show evaluation metrics"** in the sidebar to score every answer:
+
+| Metric | What it measures |
+|---|---|
+| Faithfulness | Is the answer fully supported by the retrieved context? |
+| Answer relevancy | Does the answer address the question? (0–1) |
+| Context precision | Fraction of retrieved chunks relevant to the question |
 
 ## 🧪 Tests
 
